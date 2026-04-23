@@ -24,9 +24,5 @@
             "emoji_name": "",
             "emoji_id": ""
         }
-    },
-    "stream_keepalive": {
-        "enabled": true,
-        "interval_seconds": 180
     }
 }

@@ -114,20 +114,15 @@ class UserBot(commands.Bot):
         self.current_status_text: str = ""
         self.startup_banner_printed: bool = False
         self.rotation_error_reported: bool = False
-        self.stream_keepalive_error_reported: bool = False
 
         self.rotation_task: Optional[asyncio.Task] = None
-        self.stream_keepalive_task: Optional[asyncio.Task] = None
 
     async def setup_hook(self) -> None:
         await self.restart_rotation_task()
-        await self.restart_stream_keepalive_task()
 
     async def close(self) -> None:
         if self.rotation_task:
             self.rotation_task.cancel()
-        if self.stream_keepalive_task:
-            self.stream_keepalive_task.cancel()
         try:
             await self.clear_custom_status()
         except Exception:
@@ -141,15 +136,6 @@ class UserBot(commands.Bot):
 
         if self.config.get("status_rotation", {}).get("enabled", False):
             self.rotation_task = asyncio.create_task(self.status_rotation_loop())
-
-    async def restart_stream_keepalive_task(self) -> None:
-        if self.stream_keepalive_task and not self.stream_keepalive_task.done():
-            self.stream_keepalive_task.cancel()
-        self.stream_keepalive_task = None
-
-        keepalive_cfg = self.config.get("stream_keepalive", {})
-        if bool(keepalive_cfg.get("enabled", True)):
-            self.stream_keepalive_task = asyncio.create_task(self.stream_keepalive_loop())
 
     async def apply_status(self, mode: str, text: str) -> None:
         activity = build_activity(mode=mode, text=text, game_cfg=self.game_cfg)
@@ -238,26 +224,16 @@ class UserBot(commands.Bot):
 
             await asyncio.sleep(interval)
 
-    async def stream_keepalive_loop(self) -> None:
-        await self.wait_until_ready()
-        keepalive_cfg = self.config.get("stream_keepalive", {})
-        interval = int(keepalive_cfg.get("interval_seconds", 180))
-
-        while not self.is_closed():
-            try:
-                if self.current_status_mode == "streaming":
-                    text = self.current_status_text or self.get_status_name_from_config("streaming")
-                    if text:
-                        await self.apply_status("streaming", text)
-                self.stream_keepalive_error_reported = False
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                if not self.stream_keepalive_error_reported:
-                    print(err(f"Ошибка keepalive стрима: {exc}. Решение: проверь stream настройки в game.json."))
-                    self.stream_keepalive_error_reported = True
-
-            await asyncio.sleep(interval)
+    async def reapply_streaming_if_needed(self) -> None:
+        if self.current_status_mode != "streaming":
+            return
+        config_error = self.validate_mode_config("streaming")
+        if config_error:
+            return
+        text = self.current_status_text or self.get_status_name_from_config("streaming")
+        if not text:
+            return
+        await self.apply_status("streaming", text)
 
     async def set_custom_status(self, text: str) -> None:
         token = str(self.config.get("token", "")).strip()
@@ -375,12 +351,6 @@ def ensure_config_values(config: Dict[str, Any], game_cfg: Dict[str, Any]) -> No
             if not str(emoji_cfg.get("emoji_name", "")).strip():
                 raise ValueError("config.json: status_rotation.custom_emoji.emoji_name обязателен при enabled=true")
 
-    keepalive_cfg = config.get("stream_keepalive", {})
-    if bool(keepalive_cfg.get("enabled", True)):
-        interval = int(keepalive_cfg.get("interval_seconds", 180))
-        if interval < 30:
-            raise ValueError("config.json: stream_keepalive.interval_seconds должен быть >= 30")
-
     if not isinstance(game_cfg, dict):
         raise ValueError("game.json: неверный формат")
 
@@ -441,6 +411,14 @@ async def on_ready() -> None:
         print(ok(f"Версия: v{VERSION}"))
         print(ok(f"Активность по умолчанию: {startup_view}"))
         bot.startup_banner_printed = True
+
+
+@bot.event
+async def on_resumed() -> None:
+    try:
+        await bot.reapply_streaming_if_needed()
+    except Exception as exc:
+        print(err(f"Ошибка восстановления стрима: {exc}. Решение: проверь stream в game.json и сделай .status streaming"))
 
 
 @bot.command(name="help")
@@ -550,7 +528,6 @@ async def reloadcfg_command(ctx: commands.Context, target: Optional[str] = None)
         bot.game_cfg = new_game
         bot.command_prefix = str(new_config.get("prefix", "."))
         await bot.restart_rotation_task()
-        await bot.restart_stream_keepalive_task()
 
         if bot.current_status_mode in {"playing", "streaming"}:
             mode = bot.current_status_mode

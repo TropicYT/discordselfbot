@@ -1,4 +1,4 @@
-# Discord Userbot
+﻿# Discord Userbot
 
 Простой selfbot с командами статуса, AI-ответами и ротацией **кастомного статуса** (из окна "Настроить статус").
 
@@ -10,9 +10,11 @@
 - `.status playing` — включить игровой статус из `game.json`
 - `.status streaming` — включить стрим-статус из `game.json`
 - `.status off` — убрать активность
-- `.reloadcfg` (или `.reload`) — перезагрузить `config.json` и `game.json` без рестарта
+- `.reloadcfg all|config|game` (или `.reload`) — перезагрузка конфигов без рестарта
+- `.help` с категориями команд
 - `.ai <текст>` — ответ AI через OnlySQ API
 - Авто-ротация текста кастомного статуса (не playing/streaming, не "О себе")
+- Восстановление streaming-статуса после реконнекта/резюма сессии
 
 ## Файлы
 - `app.py` — основной код
@@ -36,7 +38,8 @@
     "api_key": "openai",
     "model": "gpt-4o-mini",
     "timeout_seconds": 40,
-    "max_reply_chars": 1800
+    "max_reply_chars": 1800,
+    "system_prompt": ""
   },
   "status_rotation": {
     "enabled": false,
@@ -68,6 +71,7 @@
 - `status_rotation.custom_emoji.emoji_id`:
   - пусто для обычного unicode-эмодзи (например `emoji_name: "🔥"`)
   - заполни ID для кастомного/премиум эмодзи
+- `ai.system_prompt` — системный промпт, задающий стиль/поведение AI-ответов
 
 ## 2) Настройка game.json
 Пример:
@@ -116,14 +120,26 @@
 ![Где брать image ID](assets/image-id-guide.png)
 
 ## Команды
+- `.help`
+  - Показывает версию и категории
+- `.help activity`
+  - Команды активности
+- `.help tools`
+  - Команды инструментов
+- `.help ai`
+  - Команды/настройки AI
 - `.status playing`
   - Берет настройки только из `game.json -> game`
 - `.status streaming`
   - Берет настройки только из `game.json -> stream`
 - `.status off`
   - Убирает активность
-- `.reloadcfg`
-  - Перезагружает конфиги и заново применяет startup-режим
+- `.reloadcfg all`
+  - Перезагружает оба конфига
+- `.reloadcfg config`
+  - Перезагружает только `config.json`
+- `.reloadcfg game`
+  - Перезагружает только `game.json`
 - `.ai <текст>`
   - Отправляет запрос в OnlySQ и отвечает в чат
 
