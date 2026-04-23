@@ -9,7 +9,8 @@
         "api_key": "openai",
         "model": "gpt-4o-mini",
         "timeout_seconds": 40,
-        "max_reply_chars": 1800
+        "max_reply_chars": 1800,
+        "system_prompt": ""
     },
     "status_rotation": {
         "enabled": false,
@@ -23,5 +24,9 @@
             "emoji_name": "",
             "emoji_id": ""
         }
+    },
+    "stream_keepalive": {
+        "enabled": true,
+        "interval_seconds": 180
     }
 }

@@ -8,6 +8,7 @@ import discord
 import requests
 from discord.ext import commands
 
+VERSION = "1.1.0"
 CONFIG_PATH = Path("config.json")
 GAME_CONFIG_PATH = Path("game.json")
 COLOR_RED = "\033[91m"
@@ -113,15 +114,20 @@ class UserBot(commands.Bot):
         self.current_status_text: str = ""
         self.startup_banner_printed: bool = False
         self.rotation_error_reported: bool = False
+        self.stream_keepalive_error_reported: bool = False
 
         self.rotation_task: Optional[asyncio.Task] = None
+        self.stream_keepalive_task: Optional[asyncio.Task] = None
 
     async def setup_hook(self) -> None:
         await self.restart_rotation_task()
+        await self.restart_stream_keepalive_task()
 
     async def close(self) -> None:
         if self.rotation_task:
             self.rotation_task.cancel()
+        if self.stream_keepalive_task:
+            self.stream_keepalive_task.cancel()
         try:
             await self.clear_custom_status()
         except Exception:
@@ -135,6 +141,15 @@ class UserBot(commands.Bot):
 
         if self.config.get("status_rotation", {}).get("enabled", False):
             self.rotation_task = asyncio.create_task(self.status_rotation_loop())
+
+    async def restart_stream_keepalive_task(self) -> None:
+        if self.stream_keepalive_task and not self.stream_keepalive_task.done():
+            self.stream_keepalive_task.cancel()
+        self.stream_keepalive_task = None
+
+        keepalive_cfg = self.config.get("stream_keepalive", {})
+        if bool(keepalive_cfg.get("enabled", True)):
+            self.stream_keepalive_task = asyncio.create_task(self.stream_keepalive_loop())
 
     async def apply_status(self, mode: str, text: str) -> None:
         activity = build_activity(mode=mode, text=text, game_cfg=self.game_cfg)
@@ -223,6 +238,27 @@ class UserBot(commands.Bot):
 
             await asyncio.sleep(interval)
 
+    async def stream_keepalive_loop(self) -> None:
+        await self.wait_until_ready()
+        keepalive_cfg = self.config.get("stream_keepalive", {})
+        interval = int(keepalive_cfg.get("interval_seconds", 180))
+
+        while not self.is_closed():
+            try:
+                if self.current_status_mode == "streaming":
+                    text = self.current_status_text or self.get_status_name_from_config("streaming")
+                    if text:
+                        await self.apply_status("streaming", text)
+                self.stream_keepalive_error_reported = False
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                if not self.stream_keepalive_error_reported:
+                    print(err(f"Ошибка keepalive стрима: {exc}. Решение: проверь stream настройки в game.json."))
+                    self.stream_keepalive_error_reported = True
+
+            await asyncio.sleep(interval)
+
     async def set_custom_status(self, text: str) -> None:
         token = str(self.config.get("token", "")).strip()
         if not token:
@@ -284,13 +320,16 @@ class UserBot(commands.Bot):
         api_key = ai_cfg.get("api_key", "openai")
         model = ai_cfg.get("model", "gpt-4o-mini")
         timeout = int(ai_cfg.get("timeout_seconds", 40))
+        system_prompt = str(ai_cfg.get("system_prompt", "")).strip()
 
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
         payload = {
             "model": model,
             "request": {
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ]
+                "messages": messages
             }
         }
         headers = {
@@ -335,6 +374,12 @@ def ensure_config_values(config: Dict[str, Any], game_cfg: Dict[str, Any]) -> No
         if isinstance(emoji_cfg, dict) and bool(emoji_cfg.get("enabled", False)):
             if not str(emoji_cfg.get("emoji_name", "")).strip():
                 raise ValueError("config.json: status_rotation.custom_emoji.emoji_name обязателен при enabled=true")
+
+    keepalive_cfg = config.get("stream_keepalive", {})
+    if bool(keepalive_cfg.get("enabled", True)):
+        interval = int(keepalive_cfg.get("interval_seconds", 180))
+        if interval < 30:
+            raise ValueError("config.json: stream_keepalive.interval_seconds должен быть >= 30")
 
     if not isinstance(game_cfg, dict):
         raise ValueError("game.json: неверный формат")
@@ -393,8 +438,54 @@ async def on_ready() -> None:
         print(ok("Селфбот запущен"))
         print(ok(f"Аккаунт: {bot.user}"))
         print(ok(f"Префикс: {bot.command_prefix}"))
+        print(ok(f"Версия: v{VERSION}"))
         print(ok(f"Активность по умолчанию: {startup_view}"))
         bot.startup_banner_printed = True
+
+
+@bot.command(name="help")
+async def help_command(ctx: commands.Context, section: Optional[str] = None) -> None:
+    section = (section or "").lower().strip()
+    if not section:
+        await ctx.message.edit(content=(
+            "📘 Помощь\n"
+            f"🧩 Версия: v{VERSION}\n\n"
+            "📂 Доступные категории:\n"
+            "🎮 `.help activity`\n"
+            "🛠️ `.help tools`\n"
+            "🤖 `.help ai`"
+        ))
+        return
+
+    if section == "activity":
+        await ctx.message.edit(content=(
+            "🎮 Категория: Activity\n"
+            "`.status playing` — включить игровой статус из game.json\n"
+            "`.status streaming` — включить стрим-статус из game.json\n"
+            "`.status off` — убрать активность"
+        ))
+        return
+
+    if section == "tools":
+        await ctx.message.edit(content=(
+            "🛠️ Категория: Tools\n"
+            "`.reloadcfg all` — перезагрузить оба конфига\n"
+            "`.reloadcfg config` — перезагрузить только config.json\n"
+            "`.reloadcfg game` — перезагрузить только game.json\n"
+            "`.reload` — алиас `.reloadcfg all`"
+        ))
+        return
+
+    if section == "ai":
+        await ctx.message.edit(content=(
+            "🤖 Категория: AI\n"
+            "`.ai <текст>` — отправить запрос в AI\n"
+            "Настройка стиля ответа: `config.json -> ai.system_prompt`\n"
+            "Доступ другим: `config.json -> ai.allow_others`"
+        ))
+        return
+
+    await ctx.message.edit(content="❌ Неизвестная категория. Доступно: activity, tools, ai")
 
 
 @bot.command(name="status")
@@ -433,22 +524,51 @@ async def status_command(ctx: commands.Context, mode: Optional[str] = None) -> N
 
 
 @bot.command(name="reloadcfg", aliases=["reload"])
-async def reloadcfg_command(ctx: commands.Context) -> None:
+async def reloadcfg_command(ctx: commands.Context, target: Optional[str] = None) -> None:
     if bot.owner_id is not None and ctx.author.id != bot.owner_id:
         return
 
+    scope = (target or "all").lower().strip()
+    if scope not in {"all", "config", "game"}:
+        await ctx.message.edit(content="❌ Использование: .reloadcfg [all|config|game]")
+        return
+
     try:
-        new_config = load_json(CONFIG_PATH)
-        new_game = load_json(GAME_CONFIG_PATH)
+        if scope in {"all", "config"}:
+            new_config = load_json(CONFIG_PATH)
+        else:
+            new_config = bot.config
+
+        if scope in {"all", "game"}:
+            new_game = load_json(GAME_CONFIG_PATH)
+        else:
+            new_game = bot.game_cfg
+
         ensure_config_values(new_config, new_game)
 
         bot.config = new_config
         bot.game_cfg = new_game
         bot.command_prefix = str(new_config.get("prefix", "."))
         await bot.restart_rotation_task()
-        await bot.apply_startup_status()
+        await bot.restart_stream_keepalive_task()
 
-        await ctx.message.edit(content="✅ Конфиги перезагружены (config.json + game.json)")
+        if bot.current_status_mode in {"playing", "streaming"}:
+            mode = bot.current_status_mode
+            config_error = bot.validate_mode_config(mode)
+            if config_error is None:
+                text = bot.get_status_name_from_config(mode)
+                if text:
+                    await bot.apply_status(mode=mode, text=text)
+        else:
+            await bot.apply_startup_status()
+
+        if scope == "all":
+            msg = "✅ Перезагружены config.json + game.json"
+        elif scope == "config":
+            msg = "✅ Перезагружен config.json"
+        else:
+            msg = "✅ Перезагружен game.json"
+        await ctx.message.edit(content=msg)
     except Exception as exc:
         await ctx.message.edit(content=f"❌ Ошибка перезагрузки: {exc}. Решение: проверь JSON-синтаксис и обязательные поля")
 
