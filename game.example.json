@@ -1,0 +1,16 @@
+{
+    "startup": {
+        "game": false,
+        "stream": true
+    },
+    "game": {
+        "name": "BeamNG.drive",
+        "application_id": 123456789012345678
+    },
+    "stream": {
+        "name": "Live now",
+        "application_id": 123456789012345678,
+        "image": "myicon",
+        "url": "https://www.youtube.com/watch?v=q74fX9CnqtQ"
+    }
+}

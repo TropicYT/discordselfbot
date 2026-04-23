@@ -1,0 +1,27 @@
+{
+    "token": "YOUR_TOKEN_HERE",
+    "prefix": ".",
+    "owner_id": 0,
+    "ai": {
+        "enabled": true,
+        "allow_others": false,
+        "endpoint": "https://api.onlysq.ru/ai/v2",
+        "api_key": "openai",
+        "model": "gpt-4o-mini",
+        "timeout_seconds": 40,
+        "max_reply_chars": 1800
+    },
+    "status_rotation": {
+        "enabled": false,
+        "interval_seconds": 60,
+        "texts": [
+            "Playing solo",
+            "Grinding ranked"
+        ],
+        "custom_emoji": {
+            "enabled": false,
+            "emoji_name": "",
+            "emoji_id": ""
+        }
+    }
+}
